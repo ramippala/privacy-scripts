@@ -1,0 +1,42 @@
+# cf-warp sidecar for the existing "wirehole" stack (WireGuard + Pi-hole + DoH).
+# Drop-in:  docker compose -f cf-warp/docker-compose.yml up -d
+#
+# The SOCKS5 listener is intentionally NOT published to the host: containers on
+# the wirehole network reach it at 172.31.255.5:1080 (or "warp:1080").
+name: cf-warp
+
+services:
+  warp:
+    image: ghcr.io/ramippala/cf-warp:latest
+    container_name: warp
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - MKNOD
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    device_cgroup_rules:
+      - 'c 10:200 rwm'
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+    networks:
+      wirehole:
+        ipv4_address: 172.31.255.5
+    volumes:
+      - ./warp-data:/var/lib/cloudflare-warp
+    environment:
+      TZ: Asia/Kolkata
+      # SOCKS_USER: warp
+      # SOCKS_PASS: change-me
+      # WARP_LICENSE_KEY: ""      # only for WARP+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  wirehole:
+    external: true
+    name: wirehole
