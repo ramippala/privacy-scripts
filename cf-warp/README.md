@@ -1,21 +1,20 @@
 # cf-warp
 
 Minimal Cloudflare WARP client image: official `warp-svc` in TUN mode plus a
-SOCKS5 listener, meant to sit in front of the `wirehole` WireGuard stack so
-selected egress leaves through Cloudflare instead of the VPS IP.
+SOCKS5 listener, for sending selected egress through Cloudflare instead of the
+host's own IP.
 
 ## Why it is small
 
 | Piece | Choice |
 | --- | --- |
 | Base | `debian:bookworm-slim`, docs/locales excluded |
-| Binaries | only `warp-svc` + `warp-cli`, stripped (`warp-dex`, `warp-diag`, Flutter GUI dropped) |
+| Binaries | only `warp-svc` + `warp-cli`, stripped (GUI, `warp-dex`, `warp-diag` dropped) |
 | Proxy | `microsocks` (~40 KB) instead of gost |
 | Runtime deps | just the shared libs the daemon links + `iproute2`/`nftables` |
 
-Result: **~72 MB compressed / ~297 MB on disk**, versus the Ubuntu-based
-`caomingjun/warp` image. No dbus daemon, no sudo, no systemd, no build tools in
-the final layer.
+Result: **~72 MB compressed / ~207 MB pulled**. No dbus daemon, no sudo, no
+systemd, no build tools in the final layer.
 
 ## Build
 
@@ -32,11 +31,14 @@ Pin a WARP client version with `--build-arg WARP_VERSION=2026.8.2115.0`
 
 ## Run
 
-Standalone (attaches to the existing `wirehole` network):
-
 ```bash
 cd cf-warp && docker compose up -d
 ```
+
+The example compose file creates its own bridge network and publishes the
+listener on `127.0.0.1:1080`, so it does not depend on any existing subnet or
+container IP. To place it beside another stack, drop the `ports:` block, attach
+that stack's (external) network, and address it as `warp:1080`.
 
 Required runtime knobs:
 
@@ -49,9 +51,9 @@ Required runtime knobs:
 
 ```bash
 # through the proxy: must show warp=on and a 2a09:bac* (WARP) exit IP
-curl -s --socks5-hostname 172.31.255.5:1080 https://www.cloudflare.com/cdn-cgi/trace
+curl -s --socks5-hostname 127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace
 
-# direct: still the VPS IP (selective masking is the point)
+# direct: still the host's own IP (selective masking is the point)
 curl -s https://www.cloudflare.com/cdn-cgi/trace
 ```
 
@@ -59,14 +61,15 @@ curl -s https://www.cloudflare.com/cdn-cgi/trace
 
 ## Use from other containers
 
-SOCKS5 only inside the `wirehole` network:
+Put the consumer on the same Docker network and use the service name — no fixed
+IP needed:
 
 ```yaml
 environment:
-  ALL_PROXY: socks5://172.31.255.5:1080
+  ALL_PROXY: socks5://warp:1080
 ```
 
-or per command: `curl --socks5-hostname 172.31.255.5:1080 ...`.
+or per command: `curl --socks5-hostname warp:1080 ...`.
 
 Optional auth: set `SOCKS_USER` + `SOCKS_PASS` (both required).
 

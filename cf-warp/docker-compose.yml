@@ -1,8 +1,11 @@
-# cf-warp sidecar for the existing "wirehole" stack (WireGuard + Pi-hole + DoH).
-# Drop-in:  docker compose -f cf-warp/docker-compose.yml up -d
+# cf-warp standalone example.
+# Start:  docker compose -f cf-warp/docker-compose.yml up -d
 #
-# The SOCKS5 listener is intentionally NOT published to the host: containers on
-# the wirehole network reach it at 172.31.255.5:1080 (or "warp:1080").
+# Uses its own bridge network and a host-local published port, so it works on
+# any machine without assuming an existing subnet or container IP.
+# To put it next to another stack instead, delete the `ports:` block, add that
+# stack's network under `networks:` with `external: true`, and reach it there by
+# service name: socks5://warp:1080
 name: cf-warp
 
 services:
@@ -20,9 +23,8 @@ services:
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
       - net.ipv6.conf.all.disable_ipv6=0
-    networks:
-      wirehole:
-        ipv4_address: 172.31.255.5
+    ports:
+      - "127.0.0.1:1080:1080"   # host-local only; drop when joining another network
     volumes:
       - ./warp-data:/var/lib/cloudflare-warp
     environment:
@@ -35,8 +37,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-networks:
-  wirehole:
-    external: true
-    name: wirehole
