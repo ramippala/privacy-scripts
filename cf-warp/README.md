@@ -46,12 +46,18 @@ Required runtime knobs:
 - `/dev/net/tun` device (plus `MKNOD` if the node must be created)
 - `net.ipv4.conf.all.src_valid_mark=1`
 - persistent volume on `/var/lib/cloudflare-warp` (keeps the registration)
+- `net.ipv4.ip_forward=1` — only for [NAT gateway mode](#route-other-containers-through-warp-l3-gateway).
+  Set it through compose/`--sysctl`; Docker mounts `/proc/sys` read-only, so
+  the entrypoint cannot enable it itself.
 
 ## Verify
 
 ```bash
 # through the proxy: must show warp=on and a 2a09:bac* (WARP) exit IP
 curl -s --socks5-hostname 127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace
+
+# from a container routed through the gateway: must also show warp=on
+curl -s https://www.cloudflare.com/cdn-cgi/trace
 
 # direct: still the host's own IP (selective masking is the point)
 curl -s https://www.cloudflare.com/cdn-cgi/trace
@@ -76,6 +82,43 @@ Optional auth: set `SOCKS_USER` + `SOCKS_PASS` (both required).
 The listener is TCP-only (microsocks). For UDP/ICMP or to make a whole container
 egress through WARP, give that container `network_mode: "service:warp"` and
 publish its ports on the `warp` service instead.
+
+## Route other containers through WARP (L3 gateway)
+
+Set `WARP_ENABLE_NAT=1` to use the container as a router: traffic forwarded to
+it is masqueraded into the tunnel, so WARP sees the tunnel address instead of
+the original private source. This is how the WireGuard stack sends client
+egress out through WARP while the host's own traffic keeps the VPS IP.
+
+```yaml
+services:
+  warp:
+    environment:
+      WARP_ENABLE_NAT: "1"
+    sysctls:
+      net.ipv4.ip_forward: "1"            # required
+      net.ipv4.conf.all.src_valid_mark: "1"
+```
+
+With it enabled the entrypoint:
+
+- switches to `warp` mode and reconnects,
+- adds `nftables` masquerade on `oifname "CloudflareWARP"` for IPv4 and IPv6,
+- clamps TCP MSS in the forward hook so PMTU works through the tunnel,
+- best-effort enables the forwarding sysctls (only effective on runtimes that
+  allow writable `/proc/sys`; Docker needs the `sysctls:` entry above).
+
+Point the consumer's routing at the container (its address on your Docker
+network):
+
+```bash
+WARP_IP=<warp-container-ip>
+ip route add default via "$WARP_IP"          # whole namespace/container
+ip route add 1.1.1.1/32 via "$WARP_IP"       # or selected destinations
+```
+
+IPv6 needs its own sysctl (`net.ipv6.conf.all.forwarding=1`); it is not enabled
+by default. The SOCKS listener is unaffected and remains TCP-only.
 
 ## Registration behaviour
 
