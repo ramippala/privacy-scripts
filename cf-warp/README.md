@@ -24,7 +24,10 @@ docker build -t cf-warp:local cf-warp/
 
 Multi-arch (`linux/amd64`, `linux/arm64`) builds run in GitHub Actions
 (`.github/workflows/cf-warp.yml`) and publish to
-`ghcr.io/ramippala/cf-warp` on pushes to `cf-warp`.
+`ghcr.io/ramippala/cf-warp` on pushes to `cf-warp`. Images are tagged
+`latest`, `cf-warp` (branch), `sha-<short-commit>`, and
+`warp-<warp-version>`, the version resolved from the Cloudflare package repo
+at build time.
 
 Pin a WARP client version with `--build-arg WARP_VERSION=2026.8.2115.0`
 (default `latest` = whatever the Cloudflare repo currently serves).
