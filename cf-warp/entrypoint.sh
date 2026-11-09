@@ -16,6 +16,7 @@ warp-svc &
 WARP_PID=$!
 
 shutdown() {
+    kill "${MICRO_PID:-}" 2>/dev/null || true
     kill "$WARP_PID" 2>/dev/null || true
     wait "$WARP_PID" 2>/dev/null || true
     exit 0
@@ -95,4 +96,35 @@ if [ -n "${SOCKS_USER:-}" ] && [ -n "${SOCKS_PASS:-}" ]; then
 fi
 
 echo "Starting SOCKS5 listener on 0.0.0.0:${SOCKS_PORT:-1080}"
-exec microsocks "$@"
+microsocks "$@" &
+MICRO_PID=$!
+
+# Keep the container alive only while both processes are. Previously the shell
+# exec'd the proxy, so a crashed warp-svc was never noticed or reaped: the
+# container stayed "Up" with a dead tunnel and forwarded traffic silently fell
+# back to the host IP instead of WARP. Exiting here hands control to the
+# runtime's restart policy. (A subshell cannot wait for a sibling process, so
+# liveness is checked through /proc; Z means it died and awaits reaping.)
+pid_alive() {
+    [ -r "/proc/$1/stat" ] || return 1
+    state=$(sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f1)
+    case "$state" in
+        "" | Z) return 1 ;;
+    esac
+    return 0
+}
+
+while pid_alive "$WARP_PID" && pid_alive "$MICRO_PID"; do
+    sleep 5
+done
+
+if pid_alive "$MICRO_PID"; then
+    echo "warp-svc is gone; stopping container so it can restart" >&2
+else
+    echo "SOCKS5 listener exited; stopping container" >&2
+fi
+
+kill "$MICRO_PID" 2>/dev/null || true
+kill "$WARP_PID" 2>/dev/null || true
+wait "$WARP_PID" 2>/dev/null || true
+exit 1
